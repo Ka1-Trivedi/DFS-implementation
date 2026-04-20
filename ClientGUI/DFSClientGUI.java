@@ -5,7 +5,7 @@ import java.net.*;
 
 public class DFSClientGUI extends JFrame {
 
-    JTextField namenodeIP = new JTextField("10.58.1.4");
+    JTextField namenodeIP = new JTextField("10.19.225.4");
     JTextField namenodePort = new JTextField("9000");
     JTextField filePath = new JTextField();
 
@@ -85,19 +85,46 @@ public class DFSClientGUI extends JFrame {
         }
     }
 
-    void uploadFile(){
-
-        try{
+    void uploadFile() {
+        try {
 
             JFileChooser chooser = new JFileChooser();
-            int res = chooser.showOpenDialog(this);
-
-            if(res != JFileChooser.APPROVE_OPTION)
+            if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
                 return;
 
             File file = chooser.getSelectedFile();
 
-            Socket socket = new Socket(datanodeIP,datanodePort);
+            Socket nn = new Socket(namenodeIP.getText(),
+                    Integer.parseInt(namenodePort.getText()));
+
+            DataOutputStream nnOut = new DataOutputStream(nn.getOutputStream());
+            DataInputStream nnIn = new DataInputStream(nn.getInputStream());
+
+            nnOut.writeUTF("UPLOAD_FILE");
+            nnOut.writeUTF(file.getName());
+
+            int count = nnIn.readInt();
+//            System.out.println("Nodes received: " + count);
+
+            if (count == 0) {
+                log("No nodes available");
+                return;
+            }
+
+            String primaryIP = nnIn.readUTF();
+            int primaryPort = nnIn.readInt();
+
+            String[] replicaIPs = new String[count - 1];
+            int[] replicaPorts = new int[count - 1];
+
+            for (int i = 1; i < count; i++) {
+                replicaIPs[i - 1] = nnIn.readUTF();
+                replicaPorts[i - 1] = nnIn.readInt();
+            }
+
+            nn.close();
+
+            Socket socket = new Socket(primaryIP, primaryPort);
 
             DataOutputStream out =
                     new DataOutputStream(socket.getOutputStream());
@@ -108,30 +135,66 @@ public class DFSClientGUI extends JFrame {
             out.writeUTF(file.getName());
             out.writeLong(file.length());
 
+            out.writeInt(replicaIPs.length);
+
+            for (int i = 0; i < replicaIPs.length; i++) {
+                out.writeUTF(replicaIPs[i]);
+                out.writeInt(replicaPorts[i]);
+            }
+
             byte[] buffer = new byte[4096];
             int bytes;
 
-            while((bytes = fis.read(buffer)) > 0){
-                out.write(buffer,0,bytes);
+            while ((bytes = fis.read(buffer)) > 0) {
+                out.write(buffer, 0, bytes);
             }
 
             fis.close();
             socket.close();
 
-            log("Uploaded file: " + file.getName());
-        }
-        catch(Exception ex){
-            log("Upload error: " + ex.getMessage());
+            log("Uploaded: " + file.getName());
+
+        } catch (Exception e) {
+            log("Upload error: " + e.getMessage());
         }
     }
 
-    void downloadFile(){
+    void downloadFile() {
 
-        try{
+        try {
 
             String filename = filePath.getText();
 
-            Socket socket = new Socket(datanodeIP,datanodePort);
+            Socket nn = new Socket(namenodeIP.getText(),
+                    Integer.parseInt(namenodePort.getText()));
+
+            DataOutputStream nnOut = new DataOutputStream(nn.getOutputStream());
+            DataInputStream nnIn = new DataInputStream(nn.getInputStream());
+
+            nnOut.writeUTF("READ_FILE");
+            nnOut.writeUTF(filename);
+
+            int count = nnIn.readInt();
+//            System.out.println("Nodes received: " + count);
+
+            if (count == 0) {
+                log("File not found");
+                return;
+            }
+
+            String[] nodes = new String[count];
+            int[] ports = new int[count];
+
+            for (int i = 0; i < count; i++) {
+                nodes[i] = nnIn.readUTF();
+                ports[i] = nnIn.readInt();
+            }
+
+            nn.close();
+
+            int idx = new java.util.Random().nextInt(count);
+
+            Socket socket = new Socket(nodes[idx], ports[idx]);
 
             DataOutputStream out =
                     new DataOutputStream(socket.getOutputStream());
@@ -150,21 +213,21 @@ public class DFSClientGUI extends JFrame {
             byte[] buffer = new byte[4096];
             int bytes;
 
-            while(size > 0 &&
-                    (bytes = in.read(buffer,0,
-                            (int)Math.min(buffer.length,size))) > 0){
+            while (size > 0 &&
+                    (bytes = in.read(buffer, 0,
+                            (int)Math.min(buffer.length, size))) > 0) {
 
-                fos.write(buffer,0,bytes);
+                fos.write(buffer, 0, bytes);
                 size -= bytes;
             }
 
             fos.close();
             socket.close();
 
-            log("Downloaded file: " + filename);
-        }
-        catch(Exception ex){
-            log("Download error: " + ex.getMessage());
+            log("Downloaded: " + filename);
+
+        } catch (Exception e) {
+            log("Download error: " + e.getMessage());
         }
     }
 
